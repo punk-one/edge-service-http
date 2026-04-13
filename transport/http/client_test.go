@@ -133,6 +133,66 @@ func TestClientReadFailureMarksRetryable(t *testing.T) {
 	}
 }
 
+func TestClientDoesNotRetryWhenContextCanceled(t *testing.T) {
+	client := NewClient(Config{
+		BaseURL:         "http://example.com",
+		Path:            "/push",
+		Timeout:         time.Second,
+		DeviceCodeField: "deviceCode",
+	}, nil)
+	client.httpClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return nil, req.Context().Err()
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	outcome, err := client.Send(ctx, ReportMessage{
+		DeviceCode: "device-01",
+		Payload:    map[string]any{"sampleId": "S-006"},
+	})
+	if err == nil {
+		t.Fatalf("expected context canceled error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got: %v", err)
+	}
+	if outcome.ShouldRetry {
+		t.Fatalf("context canceled should not be retryable: %+v", outcome)
+	}
+}
+
+func TestClientDoesNotRetryWhenContextDeadlineExceeded(t *testing.T) {
+	client := NewClient(Config{
+		BaseURL:         "http://example.com",
+		Path:            "/push",
+		Timeout:         time.Second,
+		DeviceCodeField: "deviceCode",
+	}, nil)
+	client.httpClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	time.Sleep(time.Millisecond)
+
+	outcome, err := client.Send(ctx, ReportMessage{
+		DeviceCode: "device-01",
+		Payload:    map[string]any{"sampleId": "S-007"},
+	})
+	if err == nil {
+		t.Fatalf("expected context deadline exceeded error")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline exceeded, got: %v", err)
+	}
+	if outcome.ShouldRetry {
+		t.Fatalf("context deadline exceeded should not be retryable: %+v", outcome)
+	}
+}
+
 type errReader struct{}
 
 func (errReader) Read(p []byte) (n int, err error) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	stdhttp "net/http"
@@ -58,6 +59,7 @@ func (c *Client) Send(ctx context.Context, msg ReportMessage) (DeliveryOutcome, 
 	if strings.TrimSpace(c.cfg.Path) != "" {
 		endpoint += "/" + strings.TrimLeft(c.cfg.Path, "/")
 	}
+	c.logger.Debug("http transport sending request", "endpoint", endpoint, "source", msg.Source)
 
 	req, err := stdhttp.NewRequestWithContext(ctx, stdhttp.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
@@ -74,13 +76,19 @@ func (c *Client) Send(ctx context.Context, msg ReportMessage) (DeliveryOutcome, 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return DeliveryOutcome{ShouldRetry: true, FailureReason: err.Error()}, err
+		shouldRetry := true
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			shouldRetry = false
+		}
+		c.logger.Warn("http transport request failed", "endpoint", endpoint, "retry", shouldRetry, "error", err)
+		return DeliveryOutcome{ShouldRetry: shouldRetry, FailureReason: err.Error()}, err
 	}
 	defer resp.Body.Close()
 
 	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if readErr != nil {
 		shouldRetry := resp.StatusCode >= 500 || slices.Contains(c.cfg.RetryableStatusCodes, resp.StatusCode)
+		c.logger.Warn("http transport response read failed", "status", resp.StatusCode, "retry", shouldRetry, "error", readErr)
 		return DeliveryOutcome{
 			StatusCode:    resp.StatusCode,
 			ShouldRetry:   shouldRetry,
@@ -93,6 +101,7 @@ func (c *Client) Send(ctx context.Context, msg ReportMessage) (DeliveryOutcome, 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		outcome.ShouldRetry = slices.Contains(c.cfg.RetryableStatusCodes, resp.StatusCode)
 		outcome.FailureReason = fmt.Sprintf("unexpected status code: %d", resp.StatusCode)
+		c.logger.Warn("http transport returned non-success status", "status", resp.StatusCode, "retry", outcome.ShouldRetry)
 		return outcome, fmt.Errorf(outcome.FailureReason)
 	}
 
@@ -101,11 +110,13 @@ func (c *Client) Send(ctx context.Context, msg ReportMessage) (DeliveryOutcome, 
 		outcome.Accepted = accepted
 		if !*accepted && !c.cfg.AcceptedFalseIsSuccess {
 			outcome.FailureReason = "response accepted=false"
+			c.logger.Warn("http transport rejected by downstream", "status", resp.StatusCode)
 			return outcome, fmt.Errorf(outcome.FailureReason)
 		}
 	}
 
 	outcome.Delivered = true
+	c.logger.Debug("http transport delivered", "status", resp.StatusCode)
 	return outcome, nil
 }
 
