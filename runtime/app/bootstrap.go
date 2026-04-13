@@ -114,17 +114,20 @@ func (a *Application) Run(ctx context.Context) error {
 	}
 	defer listener.Close()
 
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	a.setReady(true)
 	defer a.setReady(false)
 
-	a.dispatcher.StartReplayLoop(ctx)
+	a.dispatcher.StartReplayLoop(runCtx)
 
 	for _, worker := range a.workers {
 		if worker == nil {
 			continue
 		}
 		go func(w workerpkg.Worker) {
-			if err := w.Start(ctx, runtimeReporter{reporter: a.reporter, onError: a.recordError}); err != nil && !errors.Is(err, context.Canceled) {
+			if err := w.Start(runCtx, runtimeReporter{reporter: a.reporter, onError: a.recordError}); err != nil && !errors.Is(err, context.Canceled) {
 				a.recordError(fmt.Sprintf("%s: %v", w.Name(), err))
 			}
 		}(worker)
@@ -143,9 +146,11 @@ func (a *Application) Run(ctx context.Context) error {
 
 	select {
 	case err := <-serverErrCh:
+		cancel()
 		a.closeResources()
 		return err
 	case <-ctx.Done():
+		cancel()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = a.httpServer.Shutdown(shutdownCtx)
@@ -183,10 +188,16 @@ func (a *Application) status() opshttp.Status {
 
 	stats, err := a.store.Stats()
 	if err != nil {
-		a.recordError(err.Error())
+		if a.logger != nil {
+			a.logger.Warn("read runtime queue stats", "error", err)
+		}
+		recentErrors = append(recentErrors, err.Error())
+		if len(recentErrors) > 10 {
+			recentErrors = recentErrors[len(recentErrors)-10:]
+		}
 		return opshttp.Status{
 			Healthy:      false,
-			Ready:        false,
+			Ready:        ready,
 			RecentErrors: recentErrors,
 		}
 	}

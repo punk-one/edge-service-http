@@ -13,7 +13,7 @@
 
 ## Runtime Configuration
 
-Store runtime settings in `config.yaml` as YAML. A representative configuration looks like:
+Store runtime settings in `./configs/config.yaml` as YAML. A representative configuration looks like:
 
 ```yaml
 service:
@@ -33,8 +33,6 @@ httpReport:
 reliableQueue:
   enabled: true
   sqlitePath: ./data/runtime.db
-  batchSize: 100
-  flushIntervalMs: 1000
   replayIntervalMs: 3000
   replayRatePerSec: 20
   retentionDays: 7
@@ -61,6 +59,8 @@ func main() {
     app.Bootstrap("edge-service-example", "v0.1.0", noopWorker{})
 }
 ```
+
+`Bootstrap` loads runtime settings from `./configs/config.yaml`.
 
 ## Package Layout
 
