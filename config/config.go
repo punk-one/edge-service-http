@@ -40,7 +40,6 @@ type HTTPReportConfig struct {
 	AcceptedFalseIsSuccess     bool   `yaml:"acceptedFalseIsSuccess"`
 	OverwritePayloadDeviceCode bool   `yaml:"overwritePayloadDeviceCode"`
 	RetryableStatusCodes       []int  `yaml:"retryableStatusCodes"`
-	acceptedFalseIsSuccessSet  bool
 }
 
 type ReliableQueueConfig struct {
@@ -91,12 +90,6 @@ func Normalize(cfg Config) Config {
 	if cfg.HTTPReport.DeviceCodeField == "" {
 		cfg.HTTPReport.DeviceCodeField = def.HTTPReport.DeviceCodeField
 	}
-	if len(cfg.HTTPReport.RetryableStatusCodes) == 0 {
-		cfg.HTTPReport.RetryableStatusCodes = append([]int(nil), def.HTTPReport.RetryableStatusCodes...)
-	}
-	if !cfg.HTTPReport.acceptedFalseIsSuccessSet {
-		cfg.HTTPReport.AcceptedFalseIsSuccess = def.HTTPReport.AcceptedFalseIsSuccess
-	}
 	if cfg.ReliableQueue.SQLitePath == "" {
 		cfg.ReliableQueue.SQLitePath = cfg.Storage.SQLitePath
 	}
@@ -139,22 +132,4 @@ func defaultConfig() Config {
 			RetentionDays:    7,
 		},
 	}
-}
-
-type httpReportConfigAlias HTTPReportConfig
-
-func (c *HTTPReportConfig) UnmarshalYAML(node *yaml.Node) error {
-	var aux httpReportConfigAlias
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	*c = HTTPReportConfig(aux)
-	c.acceptedFalseIsSuccessSet = false
-	for i := 0; i < len(node.Content); i += 2 {
-		if node.Content[i].Value == "acceptedFalseIsSuccess" {
-			c.acceptedFalseIsSuccessSet = true
-			break
-		}
-	}
-	return nil
 }
