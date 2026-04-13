@@ -11,6 +11,35 @@
 - runtime bootstrap with worker registration
 - health, readiness, queue, and recent delivery endpoints
 
+## Runtime Configuration
+
+Store runtime settings in `config.yaml` as YAML. A representative configuration looks like:
+
+```yaml
+service:
+  host: 0.0.0.0
+  port: 59994
+
+httpReport:
+  baseURL: http://mes-server:9389
+  path: /api/external/iot/spectrum
+  timeoutSec: 15
+  deviceToken: your-device-token
+  deviceMac: AA:BB:CC:DD:EE:FF
+  deviceCodeField: deviceCode
+  acceptedFalseIsSuccess: true
+  retryableStatusCodes: [408, 429, 500, 502, 503, 504]
+
+reliableQueue:
+  enabled: true
+  sqlitePath: ./data/runtime.db
+  batchSize: 100
+  flushIntervalMs: 1000
+  replayIntervalMs: 3000
+  replayRatePerSec: 20
+  retentionDays: 7
+```
+
 ## Minimal Usage
 
 ```go
