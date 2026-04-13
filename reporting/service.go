@@ -10,6 +10,7 @@ import (
     "github.com/punk-one/edge-service-http/reliable"
 )
 
+// Message represents a structured device report.
 type Message struct {
     Source      string
     DeviceCode  string
@@ -22,6 +23,7 @@ type dispatcher interface {
     Submit(context.Context, reliable.OutboundMessage) error
 }
 
+// Service sends reports through a dispatcher.
 type Service struct {
     dispatcher dispatcher
 }
