@@ -120,6 +120,14 @@ func (c *Client) Send(ctx context.Context, msg ReportMessage) (DeliveryOutcome, 
 	return outcome, nil
 }
 
+func (c *Client) SendRaw(ctx context.Context, payloadJSON []byte, deviceCode string) (DeliveryOutcome, error) {
+	payload, err := decodePayload(payloadJSON)
+	if err != nil {
+		return DeliveryOutcome{FailureReason: err.Error()}, err
+	}
+	return c.Send(ctx, ReportMessage{DeviceCode: deviceCode, Payload: payload})
+}
+
 func (c *Client) buildPayload(msg ReportMessage) (map[string]any, error) {
 	payload := make(map[string]any, len(msg.Payload)+1)
 	for k, v := range msg.Payload {
@@ -147,6 +155,14 @@ func (c *Client) buildPayload(msg ReportMessage) (map[string]any, error) {
 		payload[deviceCodeField] = msg.DeviceCode
 	}
 
+	return payload, nil
+}
+
+func decodePayload(raw []byte) (map[string]any, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, err
+	}
 	return payload, nil
 }
 
