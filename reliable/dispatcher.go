@@ -42,6 +42,7 @@ type Dispatcher struct {
 	store     Store
 	logger    logging.Logger
 	stopCh    chan struct{}
+	startOnce sync.Once
 	closeOnce sync.Once
 }
 
@@ -111,22 +112,24 @@ func (d *Dispatcher) StartReplayLoop(ctx context.Context) {
 		return
 	}
 
-	ticker := time.NewTicker(time.Duration(d.cfg.ReplayIntervalMs) * time.Millisecond)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-d.stopCh:
-				return
-			case <-ticker.C:
-				if err := d.replayOnce(ctx); err != nil {
-					d.logger.Warn("reliable dispatcher replay failed", "error", err)
+	d.startOnce.Do(func() {
+		ticker := time.NewTicker(time.Duration(d.cfg.ReplayIntervalMs) * time.Millisecond)
+		go func() {
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-d.stopCh:
+					return
+				case <-ticker.C:
+					if err := d.replayOnce(ctx); err != nil {
+						d.logger.Warn("reliable dispatcher replay failed", "error", err)
+					}
 				}
 			}
-		}
-	}()
+		}()
+	})
 }
 
 func (d *Dispatcher) replayOnce(ctx context.Context) error {

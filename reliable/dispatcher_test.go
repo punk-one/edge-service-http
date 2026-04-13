@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,11 @@ type fakeTransport struct {
 type sendRawCall struct {
 	payload    []byte
 	deviceCode string
+}
+
+type blockingTransport struct {
+	calls   chan struct{}
+	release chan struct{}
 }
 
 func (f *fakeTransport) SendRaw(_ context.Context, payloadJSON []byte, deviceCode string) (transporthttp.DeliveryOutcome, error) {
@@ -39,6 +45,12 @@ func (f *fakeTransport) SendRaw(_ context.Context, payloadJSON []byte, deviceCod
 	}
 
 	return outcome, err
+}
+
+func (b *blockingTransport) SendRaw(_ context.Context, _ []byte, _ string) (transporthttp.DeliveryOutcome, error) {
+	b.calls <- struct{}{}
+	<-b.release
+	return transporthttp.DeliveryOutcome{Delivered: true}, nil
 }
 
 func TestDispatcherSubmitQueuesRetryableFailure(t *testing.T) {
@@ -218,6 +230,69 @@ func TestDispatcherReplayOnceUpdatesRetryableFailure(t *testing.T) {
 	maxNextRetry := after + 30000 + 2000
 	if job.NextRetryAt < minNextRetry || job.NextRetryAt > maxNextRetry {
 		t.Fatalf("next retry at = %d, want between %d and %d", job.NextRetryAt, minNextRetry, maxNextRetry)
+	}
+}
+
+func TestDispatcherStartReplayLoopStartsOnlyOnce(t *testing.T) {
+	store := newTestDispatcherStore(t)
+	createdAt := time.Now().Add(-time.Minute).UnixMilli()
+	if err := store.Append(StoredJob{
+		DeviceCode:   "device-01",
+		PayloadJSON:  []byte(`{"sampleId":"S-001"}`),
+		CreatedAt:    createdAt,
+		NextRetryAt:  createdAt,
+		AttemptCount: 1,
+	}); err != nil {
+		t.Fatalf("Append returned error: %v", err)
+	}
+
+	transport := &blockingTransport{
+		calls:   make(chan struct{}, 4),
+		release: make(chan struct{}),
+	}
+	dispatcher := NewDispatcher(Config{Enabled: true, ReplayIntervalMs: 10, ReplayRatePerSec: 1}, transport, store, logging.New("error", "json"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	t.Cleanup(func() { _ = dispatcher.Close() })
+
+	dispatcher.StartReplayLoop(ctx)
+	dispatcher.StartReplayLoop(ctx)
+
+	select {
+	case <-transport.calls:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected replay loop to call transport")
+	}
+
+	select {
+	case <-transport.calls:
+		t.Fatal("StartReplayLoop started multiple replay goroutines")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(transport.release)
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		stats, err := store.Stats()
+		if err != nil {
+			if strings.Contains(err.Error(), "SQLITE_BUSY") {
+				if time.Now().After(deadline) {
+					t.Fatalf("Stats kept returning busy: %v", err)
+				}
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			t.Fatalf("Stats returned error: %v", err)
+		}
+		if stats.PendingCount == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected queued job to be acked after transport release")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
