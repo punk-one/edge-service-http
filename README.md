@@ -61,3 +61,22 @@ func main() {
     app.Bootstrap("edge-service-example", "v0.1.0", noopWorker{})
 }
 ```
+
+## Package Layout
+
+- `config` - runtime config loading and normalization
+- `logging` - shared logger abstraction
+- `transport/http` - HTTP POST delivery and response classification
+- `reliable` - SQLite queue persistence and replay
+- `reporting` - application-facing reporting API
+- `runtime/worker` - worker contract for applications
+- `runtime/app` - bootstrap and runtime orchestration
+- `ops/http` - health and runtime diagnostics endpoints
+
+## Runtime Endpoints
+
+- `/api/v1/health`
+- `/api/v1/ready`
+- `/api/v1/runtime/status`
+- `/api/v1/runtime/queue`
+- `/api/v1/runtime/deliveries/recent`

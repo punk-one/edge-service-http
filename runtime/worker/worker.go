@@ -1,18 +1,18 @@
 package worker
 
 import (
-    "context"
+	"context"
 
-    "github.com/punk-one/edge-service-http/reporting"
+	"github.com/punk-one/edge-service-http/reporting"
 )
 
 // Reporter submits reporting messages for workers.
 type Reporter interface {
-    Report(context.Context, reporting.Message) error
+	Report(context.Context, reporting.Message) error
 }
 
 // Worker defines the contract for runtime tasks.
 type Worker interface {
-    Name() string
-    Start(context.Context, Reporter) error
+	Name() string
+	Start(context.Context, Reporter) error
 }
