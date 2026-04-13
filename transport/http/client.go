@@ -80,7 +80,12 @@ func (c *Client) Send(ctx context.Context, msg ReportMessage) (DeliveryOutcome, 
 
 	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if readErr != nil {
-		return DeliveryOutcome{StatusCode: resp.StatusCode, FailureReason: readErr.Error()}, readErr
+		shouldRetry := resp.StatusCode >= 500 || slices.Contains(c.cfg.RetryableStatusCodes, resp.StatusCode)
+		return DeliveryOutcome{
+			StatusCode:    resp.StatusCode,
+			ShouldRetry:   shouldRetry,
+			FailureReason: readErr.Error(),
+		}, readErr
 	}
 
 	outcome := DeliveryOutcome{StatusCode: resp.StatusCode, ResponseBody: respBody}
@@ -116,7 +121,7 @@ func (c *Client) buildPayload(msg ReportMessage) (map[string]any, error) {
 	}
 
 	if strings.TrimSpace(msg.DeviceCode) == "" {
-		return payload, nil
+		return nil, fmt.Errorf("%s is required", deviceCodeField)
 	}
 
 	if existing, exists := payload[deviceCodeField]; exists {

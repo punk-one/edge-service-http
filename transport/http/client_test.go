@@ -3,6 +3,8 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -88,4 +90,57 @@ func TestClientMarksHTTP503Retryable(t *testing.T) {
 	if !outcome.ShouldRetry {
 		t.Fatalf("503 should be retryable: %+v", outcome)
 	}
+}
+
+func TestBuildPayloadRequiresDeviceCode(t *testing.T) {
+	client := NewClient(Config{DeviceCodeField: "deviceCode"}, nil)
+
+	_, err := client.buildPayload(ReportMessage{
+		DeviceCode: "",
+		Payload:    map[string]any{"sampleId": "S-004"},
+	})
+	if err == nil {
+		t.Fatalf("expected error for blank deviceCode")
+	}
+}
+
+func TestClientReadFailureMarksRetryable(t *testing.T) {
+	client := NewClient(Config{
+		BaseURL:              "http://example.com",
+		Path:                 "/push",
+		Timeout:              time.Second,
+		DeviceCodeField:      "deviceCode",
+		RetryableStatusCodes: []int{429},
+	}, nil)
+	client.httpClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Body:       io.NopCloser(errReader{}),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})
+
+	outcome, err := client.Send(context.Background(), ReportMessage{
+		DeviceCode: "device-01",
+		Payload:    map[string]any{"sampleId": "S-005"},
+	})
+	if err == nil {
+		t.Fatalf("expected read error")
+	}
+	if !outcome.ShouldRetry {
+		t.Fatalf("read error on 503 should be retryable: %+v", outcome)
+	}
+}
+
+type errReader struct{}
+
+func (errReader) Read(p []byte) (n int, err error) {
+	return 0, errors.New("read failed")
+}
+
+type roundTripFunc func(req *http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
