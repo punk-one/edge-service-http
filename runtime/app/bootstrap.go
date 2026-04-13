@@ -229,6 +229,7 @@ func (a *Application) recordError(message string) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.healthy = false
 	const maxRecentErrors = 10
 	if len(a.recentErrors) == maxRecentErrors {
 		copy(a.recentErrors, a.recentErrors[1:])
