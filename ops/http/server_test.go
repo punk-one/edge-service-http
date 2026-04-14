@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestServerQueueEndpointReturnsPendingCount(t *testing.T) {
@@ -26,7 +28,7 @@ func TestServerQueueEndpointReturnsPendingCount(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+	if got := rec.Header().Get("Content-Type"); got != "application/json" && got != "application/json; charset=utf-8" {
 		t.Fatalf("content-type = %q", got)
 	}
 
@@ -115,5 +117,23 @@ func TestServerRecentDeliveriesEndpointReturnsErrors(t *testing.T) {
 	}
 	if len(body.RecentErrors) != 2 || body.RecentErrors[0] != "failed-a" {
 		t.Fatalf("recentErrors = %#v", body.RecentErrors)
+	}
+}
+
+func TestServerRegistersCustomRoutes(t *testing.T) {
+	server := NewServer(StatusProviderFunc(func() Status {
+		return Status{Healthy: true, Ready: true}
+	}), func(engine *gin.Engine) {
+		engine.GET("/api/v1/custom/ping", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+		})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/custom/ping", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 }

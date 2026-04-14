@@ -102,7 +102,7 @@ func (c *Client) Send(ctx context.Context, msg ReportMessage) (DeliveryOutcome, 
 		outcome.ShouldRetry = slices.Contains(c.cfg.RetryableStatusCodes, resp.StatusCode)
 		outcome.FailureReason = fmt.Sprintf("unexpected status code: %d", resp.StatusCode)
 		c.logger.Warn("http transport returned non-success status", "status", resp.StatusCode, "retry", outcome.ShouldRetry)
-		return outcome, fmt.Errorf(outcome.FailureReason)
+		return outcome, errors.New(outcome.FailureReason)
 	}
 
 	accepted := parseAccepted(respBody)
@@ -111,7 +111,7 @@ func (c *Client) Send(ctx context.Context, msg ReportMessage) (DeliveryOutcome, 
 		if !*accepted && !c.cfg.AcceptedFalseIsSuccess {
 			outcome.FailureReason = "response accepted=false"
 			c.logger.Warn("http transport rejected by downstream", "status", resp.StatusCode)
-			return outcome, fmt.Errorf(outcome.FailureReason)
+			return outcome, errors.New(outcome.FailureReason)
 		}
 	}
 
