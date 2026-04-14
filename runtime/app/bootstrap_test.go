@@ -5,9 +5,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/punk-one/edge-service-http/config"
 	"github.com/punk-one/edge-service-http/logging"
 	"github.com/punk-one/edge-service-http/reliable"
 	"github.com/punk-one/edge-service-http/reporting"
@@ -261,5 +265,138 @@ func TestApplicationStatusDoesNotLatchUnhealthyOnStatsError(t *testing.T) {
 	}
 	if status.PendingCount != 2 {
 		t.Fatalf("pending count = %d, want 2", status.PendingCount)
+	}
+}
+
+func TestNewUsesOptionsConfigPath(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	sqlitePath := filepath.Join(dir, "runtime.db")
+
+	configYAML := "service:\n  host: 127.0.0.1\n  port: 0\nlogging:\n  level: info\n  format: json\nhttpReport:\n  baseURL: http://127.0.0.1:1\n  path: /report\n  timeoutSec: 1\nreliableQueue:\n  enabled: false\n  sqlitePath: " + sqlitePath + "\n  replayIntervalMs: 10\n  replayRatePerSec: 1\n  retentionDays: 1\n"
+	if err := os.WriteFile(cfgPath, []byte(configYAML), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	app, err := New(AppConfig{
+		Options: Options{
+			ConfigPath:      cfgPath,
+			RouteRegistrars: []RouteRegistrar{nil},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	if app.options.ConfigPath != cfgPath {
+		t.Fatalf("options config path = %q, want %q", app.options.ConfigPath, cfgPath)
+	}
+	if got, want := len(app.options.RouteRegistrars), 1; got != want {
+		t.Fatalf("route registrar count = %d, want %d", got, want)
+	}
+}
+
+func TestNewUsesOptionsConfigOverride(t *testing.T) {
+	app, err := New(AppConfig{
+		ConfigPath: "/definitely/missing/config.yaml",
+		Options: Options{
+			Config: &config.Config{
+				Service: config.ServiceConfig{Host: "127.0.0.1", Port: 0},
+				HTTPReport: config.HTTPReportConfig{
+					BaseURL:                "http://override.local",
+					Path:                   "/report",
+					TimeoutSec:             1,
+					DeviceCodeField:        "deviceCode",
+					AcceptedFalseIsSuccess: true,
+				},
+				ReliableQueue: config.ReliableQueueConfig{
+					Enabled:          false,
+					SQLitePath:       filepath.Join(t.TempDir(), "runtime.db"),
+					ReplayIntervalMs: 10,
+					ReplayRatePerSec: 1,
+					RetentionDays:    1,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	if got := app.cfg.HTTPReport.BaseURL; got != "http://override.local" {
+		t.Fatalf("httpReport.baseURL = %q, want override value", got)
+	}
+}
+
+func TestResolveConfigPathFallsBackToDefault(t *testing.T) {
+	if got := resolveConfigPath(""); got != defaultConfigPath {
+		t.Fatalf("resolveConfigPath(\"\") = %q, want %q", got, defaultConfigPath)
+	}
+}
+
+func TestResolveConfigPathPreservesExplicitValue(t *testing.T) {
+	const path = "/tmp/custom-config.yaml"
+	if got := resolveConfigPath(path); got != path {
+		t.Fatalf("resolveConfigPath(%q) = %q, want %q", path, got, path)
+	}
+}
+
+func TestRouteRegistrarTypeDoesNotReferenceGin(t *testing.T) {
+	typ := reflect.TypeOf(RouteRegistrar(nil))
+	if typ.Kind() != reflect.Func {
+		t.Fatalf("RouteRegistrar kind = %v, want func", typ.Kind())
+	}
+	if typ.NumIn() != 1 {
+		t.Fatalf("RouteRegistrar args = %d, want 1 generic target arg", typ.NumIn())
+	}
+
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not locate test file path")
+	}
+
+	optionsPath := filepath.Join(filepath.Dir(thisFile), "options.go")
+	data, err := os.ReadFile(optionsPath)
+	if err != nil {
+		t.Fatalf("read options.go: %v", err)
+	}
+
+	source := string(data)
+	if strings.Contains(source, "github.com/gin-gonic/gin") || strings.Contains(source, "*gin.Engine") {
+		t.Fatalf("route options should be runtime-agnostic, options.go still references gin")
+	}
+}
+
+func TestNewConfiguresFileLoggerWhenConfigured(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	sqlitePath := filepath.Join(dir, "runtime.db")
+	logPath := filepath.Join(dir, "runtime.log")
+
+	configYAML := "service:\n  host: 127.0.0.1\n  port: 0\nlogging:\n  level: info\n  format: json\n  file: " + logPath + "\n  maxSize: 1\n  maxFiles: 1\n  maxBackups: 1\n  compress: false\nhttpReport:\n  baseURL: http://127.0.0.1:1\n  path: /report\n  timeoutSec: 1\nreliableQueue:\n  enabled: false\n  sqlitePath: " + sqlitePath + "\n  replayIntervalMs: 10\n  replayRatePerSec: 1\n  retentionDays: 1\n"
+	if err := os.WriteFile(cfgPath, []byte(configYAML), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	app, err := New(AppConfig{ConfigPath: cfgPath})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	app.logger.Info("file logger smoke")
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		data, err := os.ReadFile(logPath)
+		if err == nil {
+			if !strings.Contains(string(data), "file logger smoke") {
+				t.Fatalf("log file does not include expected message: %s", string(data))
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected log file %q to be created: %v", logPath, err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

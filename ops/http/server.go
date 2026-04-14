@@ -1,8 +1,9 @@
 package http
 
 import (
-	"encoding/json"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
 type Status struct {
@@ -23,56 +24,71 @@ func (f StatusProviderFunc) Status() Status {
 	return f()
 }
 
+type RouteRegistrar func(*gin.Engine)
+
 type Server struct {
-	provider StatusProvider
+	provider   StatusProvider
+	registrars []RouteRegistrar
 }
 
-func NewServer(provider StatusProvider) *Server {
+func NewServer(provider StatusProvider, registrars ...RouteRegistrar) *Server {
 	if provider == nil {
 		provider = StatusProviderFunc(func() Status { return Status{} })
 	}
-	return &Server{provider: provider}
+	return &Server{
+		provider:   provider,
+		registrars: append([]RouteRegistrar(nil), registrars...),
+	}
 }
 
 func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
-		status := s.provider.Status()
-		code := http.StatusOK
-		if !status.Healthy {
-			code = http.StatusServiceUnavailable
+	engine := gin.New()
+	engine.Any("/api/v1/health", s.handleHealth)
+	engine.Any("/api/v1/ready", s.handleReady)
+	engine.Any("/api/v1/runtime/status", s.handleRuntimeStatus)
+	engine.Any("/api/v1/runtime/queue", s.handleRuntimeQueue)
+	engine.Any("/api/v1/runtime/deliveries/recent", s.handleRecentDeliveries)
+	for _, register := range s.registrars {
+		if register != nil {
+			register(engine)
 		}
-		writeJSON(w, code, map[string]bool{"healthy": status.Healthy})
-	})
-	mux.HandleFunc("/api/v1/ready", func(w http.ResponseWriter, r *http.Request) {
-		status := s.provider.Status()
-		code := http.StatusOK
-		if !status.Ready {
-			code = http.StatusServiceUnavailable
-		}
-		writeJSON(w, code, map[string]bool{"ready": status.Ready})
-	})
-	mux.HandleFunc("/api/v1/runtime/status", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, s.provider.Status())
-	})
-	mux.HandleFunc("/api/v1/runtime/queue", func(w http.ResponseWriter, r *http.Request) {
-		status := s.provider.Status()
-		writeJSON(w, http.StatusOK, map[string]int64{
-			"pendingCount":       status.PendingCount,
-			"oldestPendingAgeMs": status.OldestPendingAge,
-		})
-	})
-	mux.HandleFunc("/api/v1/runtime/deliveries/recent", func(w http.ResponseWriter, r *http.Request) {
-		status := s.provider.Status()
-		writeJSON(w, http.StatusOK, map[string][]string{
-			"recentErrors": append([]string(nil), status.RecentErrors...),
-		})
-	})
-	return mux
+	}
+	return engine
 }
 
-func writeJSON(w http.ResponseWriter, statusCode int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(payload)
+func (s *Server) handleHealth(c *gin.Context) {
+	status := s.provider.Status()
+	code := http.StatusOK
+	if !status.Healthy {
+		code = http.StatusServiceUnavailable
+	}
+	c.JSON(code, map[string]bool{"healthy": status.Healthy})
+}
+
+func (s *Server) handleReady(c *gin.Context) {
+	status := s.provider.Status()
+	code := http.StatusOK
+	if !status.Ready {
+		code = http.StatusServiceUnavailable
+	}
+	c.JSON(code, map[string]bool{"ready": status.Ready})
+}
+
+func (s *Server) handleRuntimeStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, s.provider.Status())
+}
+
+func (s *Server) handleRuntimeQueue(c *gin.Context) {
+	status := s.provider.Status()
+	c.JSON(http.StatusOK, map[string]int64{
+		"pendingCount":       status.PendingCount,
+		"oldestPendingAgeMs": status.OldestPendingAge,
+	})
+}
+
+func (s *Server) handleRecentDeliveries(c *gin.Context) {
+	status := s.provider.Status()
+	c.JSON(http.StatusOK, map[string][]string{
+		"recentErrors": append([]string(nil), status.RecentErrors...),
+	})
 }

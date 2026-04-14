@@ -41,12 +41,13 @@ type Dispatcher struct {
 	transport Transport
 	store     Store
 	logger    logging.Logger
+	observers []DeliveryObserver
 	stopCh    chan struct{}
 	startOnce sync.Once
 	closeOnce sync.Once
 }
 
-func NewDispatcher(cfg Config, transport Transport, store Store, logger logging.Logger) *Dispatcher {
+func NewDispatcher(cfg Config, transport Transport, store Store, logger logging.Logger, observers ...DeliveryObserver) *Dispatcher {
 	if cfg.ReplayIntervalMs <= 0 {
 		cfg.ReplayIntervalMs = defaultReplayIntervalMs
 	}
@@ -65,6 +66,7 @@ func NewDispatcher(cfg Config, transport Transport, store Store, logger logging.
 		transport: transport,
 		store:     store,
 		logger:    logger,
+		observers: append([]DeliveryObserver(nil), observers...),
 		stopCh:    make(chan struct{}),
 	}
 }
@@ -75,11 +77,26 @@ func (d *Dispatcher) Submit(ctx context.Context, message OutboundMessage) error 
 	}
 
 	outcome, err := d.transport.SendRaw(ctx, message.PayloadJSON, message.DeviceCode)
+	event := DeliveryEvent{
+		TraceID:       message.TraceID,
+		DeviceCode:    message.DeviceCode,
+		CollectedAt:   message.CollectedAt,
+		AttemptCount:  1,
+		ShouldRetry:   outcome.ShouldRetry,
+		StatusCode:    outcome.StatusCode,
+		Accepted:      outcome.Accepted,
+		FailureReason: errorString(outcome, err),
+		OccurredAt:    time.Now().UnixMilli(),
+	}
 	if outcome.Delivered && err == nil {
+		event.Delivered = true
+		event.FailureReason = ""
+		d.observe(event)
 		return nil
 	}
 
 	if !outcome.ShouldRetry || !d.cfg.Enabled {
+		d.observe(event)
 		return err
 	}
 	if d.store == nil {
@@ -103,6 +120,8 @@ func (d *Dispatcher) Submit(ctx context.Context, message OutboundMessage) error 
 		return fmt.Errorf("append reliable job: %w", appendErr)
 	}
 
+	event.Queued = true
+	d.observe(event)
 	d.logger.Warn("reliable dispatcher queued retryable message", "device_code", message.DeviceCode, "status", outcome.StatusCode, "error", job.LastError)
 	return nil
 }
@@ -159,13 +178,30 @@ func (d *Dispatcher) replayOnce(ctx context.Context) error {
 
 	for _, job := range jobs {
 		outcome, sendErr := d.transport.SendRaw(ctx, job.PayloadJSON, job.DeviceCode)
+		event := DeliveryEvent{
+			TraceID:       job.TraceID,
+			DeviceCode:    job.DeviceCode,
+			CollectedAt:   job.CollectedAt,
+			AttemptCount:  job.AttemptCount + 1,
+			Queued:        true,
+			ShouldRetry:   outcome.ShouldRetry,
+			StatusCode:    outcome.StatusCode,
+			Accepted:      outcome.Accepted,
+			FailureReason: errorString(outcome, sendErr),
+			Replay:        true,
+			OccurredAt:    time.Now().UnixMilli(),
+		}
 		if outcome.Delivered && sendErr == nil {
 			ackIDs = append(ackIDs, job.ID)
+			event.Delivered = true
+			event.FailureReason = ""
+			d.observe(event)
 			continue
 		}
 
 		if !outcome.ShouldRetry {
 			ackIDs = append(ackIDs, job.ID)
+			d.observe(event)
 			continue
 		}
 
@@ -177,6 +213,7 @@ func (d *Dispatcher) replayOnce(ctx context.Context) error {
 		if err := d.store.UpdateFailure(job.ID, job.AttemptCount+1, nextRetryAt, errorString(outcome, sendErr), outcome.StatusCode); err != nil {
 			return err
 		}
+		d.observe(event)
 		return nil
 	}
 
@@ -201,4 +238,12 @@ func errorString(outcome transporthttp.DeliveryOutcome, err error) string {
 		return fmt.Sprintf("status code %d", outcome.StatusCode)
 	}
 	return "delivery failed"
+}
+
+func (d *Dispatcher) observe(event DeliveryEvent) {
+	for _, observer := range d.observers {
+		if observer != nil {
+			observer.OnDelivery(event)
+		}
+	}
 }

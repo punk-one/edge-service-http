@@ -56,11 +56,20 @@ func (b *blockingTransport) SendRaw(_ context.Context, _ []byte, _ string) (tran
 func TestDispatcherSubmitQueuesRetryableFailure(t *testing.T) {
 	store := newTestDispatcherStore(t)
 	transportErr := errors.New("temporary upstream failure")
+	var events []DeliveryEvent
 	transport := &fakeTransport{
 		outcomes: []transporthttp.DeliveryOutcome{{ShouldRetry: true, StatusCode: 503, FailureReason: "temporary upstream failure"}},
 		errs:     []error{transportErr},
 	}
-	dispatcher := NewDispatcher(Config{Enabled: true}, transport, store, logging.New("error", "json"))
+	dispatcher := NewDispatcher(
+		Config{Enabled: true},
+		transport,
+		store,
+		logging.New("error", "json"),
+		DeliveryObserverFunc(func(event DeliveryEvent) {
+			events = append(events, event)
+		}),
+	)
 
 	msg := OutboundMessage{
 		Source:      "edge",
@@ -105,6 +114,15 @@ func TestDispatcherSubmitQueuesRetryableFailure(t *testing.T) {
 	if job.CreatedAt == 0 || job.NextRetryAt == 0 {
 		t.Fatalf("expected timestamps to be set, got created_at=%d next_retry_at=%d", job.CreatedAt, job.NextRetryAt)
 	}
+	if len(events) != 1 {
+		t.Fatalf("delivery events = %d, want 1", len(events))
+	}
+	if !events[0].Queued || events[0].Delivered || !events[0].ShouldRetry {
+		t.Fatalf("event = %+v, want queued retryable failure", events[0])
+	}
+	if events[0].TraceID != msg.TraceID {
+		t.Fatalf("traceID = %q, want %q", events[0].TraceID, msg.TraceID)
+	}
 }
 
 func TestDispatcherSubmitDoesNotQueueDeliveredOrNonRetryable(t *testing.T) {
@@ -142,10 +160,12 @@ func TestDispatcherSubmitDoesNotQueueDeliveredOrNonRetryable(t *testing.T) {
 
 func TestDispatcherReplayOnceAcksDeliveredJobs(t *testing.T) {
 	store := newTestDispatcherStore(t)
+	traceID := "trace-replay-success"
 	createdAt := time.Now().Add(-time.Minute).UnixMilli()
 	if err := store.Append(StoredJob{
 		DeviceCode:     "device-01",
 		PayloadJSON:    []byte(`{"sampleId":"S-001"}`),
+		TraceID:        traceID,
 		CreatedAt:      createdAt,
 		NextRetryAt:    createdAt,
 		AttemptCount:   1,
@@ -155,8 +175,17 @@ func TestDispatcherReplayOnceAcksDeliveredJobs(t *testing.T) {
 		t.Fatalf("Append returned error: %v", err)
 	}
 
+	var events []DeliveryEvent
 	transport := &fakeTransport{outcomes: []transporthttp.DeliveryOutcome{{Delivered: true}}}
-	dispatcher := NewDispatcher(Config{Enabled: true, ReplayRatePerSec: 1}, transport, store, logging.New("error", "json"))
+	dispatcher := NewDispatcher(
+		Config{Enabled: true, ReplayRatePerSec: 1},
+		transport,
+		store,
+		logging.New("error", "json"),
+		DeliveryObserverFunc(func(event DeliveryEvent) {
+			events = append(events, event)
+		}),
+	)
 
 	if err := dispatcher.replayOnce(context.Background()); err != nil {
 		t.Fatalf("replayOnce returned error: %v", err)
@@ -165,6 +194,15 @@ func TestDispatcherReplayOnceAcksDeliveredJobs(t *testing.T) {
 	assertPendingCount(t, store, 0)
 	if len(transport.calls) != 1 {
 		t.Fatalf("transport calls = %d, want 1", len(transport.calls))
+	}
+	if len(events) != 1 {
+		t.Fatalf("delivery events = %d, want 1", len(events))
+	}
+	if !events[0].Delivered || !events[0].Replay || !events[0].Queued {
+		t.Fatalf("event = %+v, want replay delivery success", events[0])
+	}
+	if events[0].TraceID != traceID {
+		t.Fatalf("traceID = %q, want %q", events[0].TraceID, traceID)
 	}
 }
 

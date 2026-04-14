@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/punk-one/edge-service-http/config"
 	"github.com/punk-one/edge-service-http/logging"
 	opshttp "github.com/punk-one/edge-service-http/ops/http"
@@ -21,9 +22,12 @@ import (
 	transporthttp "github.com/punk-one/edge-service-http/transport/http"
 )
 
+const defaultConfigPath = "./configs/config.yaml"
+
 type AppConfig struct {
 	ConfigPath string
 	Workers    []workerpkg.Worker
+	Options    Options
 }
 
 type Application struct {
@@ -35,6 +39,7 @@ type Application struct {
 	ops        *opshttp.Server
 	httpServer *stdhttp.Server
 	workers    []workerpkg.Worker
+	options    Options
 
 	mu           sync.RWMutex
 	healthy      bool
@@ -43,12 +48,33 @@ type Application struct {
 }
 
 func New(appCfg AppConfig) (*Application, error) {
-	cfg, err := config.Load(appCfg.ConfigPath)
-	if err != nil {
-		return nil, err
+	opts := appCfg.Options
+	if opts.ConfigPath == "" {
+		opts.ConfigPath = appCfg.ConfigPath
 	}
 
-	logger := logging.New(cfg.Logging.Level, cfg.Logging.Format)
+	var (
+		cfg config.Config
+		err error
+	)
+	if opts.Config != nil {
+		cfg = config.Normalize(*opts.Config)
+	} else {
+		cfg, err = config.Load(opts.ConfigPath)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	logger := logging.New(logging.Config{
+		Level:      cfg.Logging.Level,
+		Format:     cfg.Logging.Format,
+		File:       cfg.Logging.File,
+		MaxSize:    cfg.Logging.MaxSize,
+		MaxFiles:   cfg.Logging.MaxFiles,
+		MaxBackups: cfg.Logging.MaxBackups,
+		Compress:   cfg.Logging.Compress,
+	})
 	transport := transporthttp.NewClient(transporthttp.Config{
 		BaseURL:                    cfg.HTTPReport.BaseURL,
 		Path:                       cfg.HTTPReport.Path,
@@ -71,7 +97,7 @@ func New(appCfg AppConfig) (*Application, error) {
 		ReplayIntervalMs: cfg.ReliableQueue.ReplayIntervalMs,
 		ReplayRatePerSec: cfg.ReliableQueue.ReplayRatePerSec,
 		RetentionDays:    cfg.ReliableQueue.RetentionDays,
-	}, transport, store, logger)
+	}, transport, store, logger, opts.DeliveryObservers...)
 
 	application := &Application{
 		cfg:        cfg,
@@ -80,9 +106,17 @@ func New(appCfg AppConfig) (*Application, error) {
 		dispatcher: dispatcher,
 		reporter:   reporting.New(dispatcher),
 		workers:    append([]workerpkg.Worker(nil), appCfg.Workers...),
-		healthy:    true,
+		options: Options{
+			ConfigPath:        opts.ConfigPath,
+			RouteRegistrars:   append([]RouteRegistrar(nil), opts.RouteRegistrars...),
+			DeliveryObservers: append([]reliable.DeliveryObserver(nil), opts.DeliveryObservers...),
+		},
+		healthy: true,
 	}
-	application.ops = opshttp.NewServer(opshttp.StatusProviderFunc(application.status))
+	application.ops = opshttp.NewServer(
+		opshttp.StatusProviderFunc(application.status),
+		runtimeRouteRegistrars(application.options.RouteRegistrars)...,
+	)
 	application.httpServer = &stdhttp.Server{
 		Addr:    fmt.Sprintf("%s:%d", cfg.Service.Host, cfg.Service.Port),
 		Handler: application.ops.Handler(),
@@ -92,12 +126,18 @@ func New(appCfg AppConfig) (*Application, error) {
 }
 
 func Bootstrap(serviceName, version string, workers ...workerpkg.Worker) {
+	BootstrapWithOptions(serviceName, version, Options{ConfigPath: defaultConfigPath}, workers...)
+}
+
+func BootstrapWithOptions(serviceName, version string, options Options, workers ...workerpkg.Worker) {
+	options.ConfigPath = resolveConfigPath(options.ConfigPath)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	application, err := New(AppConfig{
-		ConfigPath: "./configs/config.yaml",
-		Workers:    workers,
+		Workers: workers,
+		Options: options,
 	})
 	if err != nil {
 		panic(fmt.Sprintf("%s %s bootstrap failed: %v", serviceName, version, err))
@@ -105,6 +145,31 @@ func Bootstrap(serviceName, version string, workers ...workerpkg.Worker) {
 	if err := application.Run(ctx); err != nil {
 		panic(fmt.Sprintf("%s %s runtime failed: %v", serviceName, version, err))
 	}
+}
+
+func resolveConfigPath(path string) string {
+	if path == "" {
+		return defaultConfigPath
+	}
+	return path
+}
+
+func runtimeRouteRegistrars(registrars []RouteRegistrar) []opshttp.RouteRegistrar {
+	if len(registrars) == 0 {
+		return nil
+	}
+
+	converted := make([]opshttp.RouteRegistrar, 0, len(registrars))
+	for _, register := range registrars {
+		if register == nil {
+			continue
+		}
+		r := register
+		converted = append(converted, func(engine *gin.Engine) {
+			r(engine)
+		})
+	}
+	return converted
 }
 
 func (a *Application) Run(ctx context.Context) error {

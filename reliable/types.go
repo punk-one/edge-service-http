@@ -19,6 +19,31 @@ type QueueStats struct {
 	OldestPendingCreatedAt int64
 }
 
+type DeliveryEvent struct {
+	TraceID       string
+	DeviceCode    string
+	CollectedAt   int64
+	AttemptCount  int
+	Delivered     bool
+	Queued        bool
+	ShouldRetry   bool
+	StatusCode    int
+	Accepted      *bool
+	FailureReason string
+	Replay        bool
+	OccurredAt    int64
+}
+
+type DeliveryObserver interface {
+	OnDelivery(DeliveryEvent)
+}
+
+type DeliveryObserverFunc func(DeliveryEvent)
+
+func (f DeliveryObserverFunc) OnDelivery(event DeliveryEvent) {
+	f(event)
+}
+
 type Store interface {
 	Append(job StoredJob) error
 	FetchPending(limit int) ([]StoredJob, error)

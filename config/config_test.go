@@ -26,6 +26,12 @@ func TestLoadConfigAppliesDefaults(t *testing.T) {
 	if cfg.ReliableQueue.SQLitePath == "" {
 		t.Fatalf("SQLitePath should be defaulted")
 	}
+	if cfg.Logging.MaxFiles != 7 {
+		t.Fatalf("MaxFiles = %d, want 7", cfg.Logging.MaxFiles)
+	}
+	if cfg.Logging.MaxBackups != 0 {
+		t.Fatalf("MaxBackups = %d, want 0", cfg.Logging.MaxBackups)
+	}
 }
 
 func TestLoadConfigPreservesExplicitRetryableStatuses(t *testing.T) {
@@ -85,5 +91,67 @@ func TestLoadConfigPreservesExplicitEmptyRetryableStatuses(t *testing.T) {
 	}
 	if len(cfg.HTTPReport.RetryableStatusCodes) != 0 {
 		t.Fatalf("retryable status count = %d, want %d", len(cfg.HTTPReport.RetryableStatusCodes), 0)
+	}
+}
+
+func TestNormalizeSetsLoggingRotationDefaults(t *testing.T) {
+	cfg := Normalize(Config{})
+
+	if cfg.Logging.Level != "info" {
+		t.Fatalf("level = %q, want info", cfg.Logging.Level)
+	}
+	if cfg.Logging.Format != "json" {
+		t.Fatalf("format = %q, want json", cfg.Logging.Format)
+	}
+	if cfg.Logging.MaxSize != 100 {
+		t.Fatalf("maxSize = %d, want 100", cfg.Logging.MaxSize)
+	}
+	if cfg.Logging.MaxBackups != 0 {
+		t.Fatalf("maxBackups = %d, want 0", cfg.Logging.MaxBackups)
+	}
+	if cfg.Logging.MaxFiles != 7 {
+		t.Fatalf("maxFiles = %d, want 7", cfg.Logging.MaxFiles)
+	}
+}
+
+func TestLoadConfigUsesMaxBackupsWhenMaxFilesOmitted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	body := []byte(`logging:
+  maxBackups: 4
+`)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Logging.MaxFiles != 0 {
+		t.Fatalf("maxFiles = %d, want 0", cfg.Logging.MaxFiles)
+	}
+	if cfg.Logging.MaxBackups != 4 {
+		t.Fatalf("maxBackups = %d, want 4", cfg.Logging.MaxBackups)
+	}
+}
+
+func TestLoadConfigDefaultsMaxFilesWhenRetentionUnset(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	body := []byte("logging:\n  level: debug\n")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Logging.MaxFiles != 7 {
+		t.Fatalf("maxFiles = %d, want 7", cfg.Logging.MaxFiles)
+	}
+	if cfg.Logging.MaxBackups != 0 {
+		t.Fatalf("maxBackups = %d, want 0", cfg.Logging.MaxBackups)
 	}
 }

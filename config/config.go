@@ -22,8 +22,13 @@ type ServiceConfig struct {
 }
 
 type LoggingConfig struct {
-	Level  string `yaml:"level"`
-	Format string `yaml:"format"`
+	Level      string `yaml:"level"`
+	Format     string `yaml:"format"`
+	File       string `yaml:"file"`
+	MaxSize    int    `yaml:"maxSize"`
+	MaxFiles   int    `yaml:"maxFiles"`
+	MaxBackups int    `yaml:"maxBackups"`
+	Compress   bool   `yaml:"compress"`
 }
 
 type StorageConfig struct {
@@ -64,7 +69,15 @@ func Load(path string) (Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
-	return Normalize(cfg), nil
+
+	hasMaxFiles, hasMaxBackups, err := loggingRetentionFieldPresence(data)
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg = Normalize(cfg)
+	cfg.Logging = normalizeLoggingRetention(cfg.Logging, hasMaxFiles, hasMaxBackups)
+	return cfg, nil
 }
 
 func Normalize(cfg Config) Config {
@@ -80,6 +93,12 @@ func Normalize(cfg Config) Config {
 	}
 	if cfg.Logging.Format == "" {
 		cfg.Logging.Format = def.Logging.Format
+	}
+	if cfg.Logging.MaxSize == 0 {
+		cfg.Logging.MaxSize = def.Logging.MaxSize
+	}
+	if cfg.Logging.MaxFiles == 0 && cfg.Logging.MaxBackups == 0 {
+		cfg.Logging.MaxFiles = def.Logging.MaxFiles
 	}
 	if cfg.Storage.SQLitePath == "" {
 		cfg.Storage.SQLitePath = def.Storage.SQLitePath
@@ -111,10 +130,46 @@ func Normalize(cfg Config) Config {
 	return cfg
 }
 
+func loggingRetentionFieldPresence(data []byte) (bool, bool, error) {
+	var raw struct {
+		Logging struct {
+			MaxFiles   *int `yaml:"maxFiles"`
+			MaxBackups *int `yaml:"maxBackups"`
+		} `yaml:"logging"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return false, false, fmt.Errorf("parse config: %w", err)
+	}
+	return raw.Logging.MaxFiles != nil, raw.Logging.MaxBackups != nil, nil
+}
+
+func normalizeLoggingRetention(cfg LoggingConfig, hasMaxFiles, hasMaxBackups bool) LoggingConfig {
+	def := defaultConfig().Logging
+
+	switch {
+	case !hasMaxFiles && !hasMaxBackups:
+		cfg.MaxFiles = def.MaxFiles
+		cfg.MaxBackups = 0
+	case !hasMaxFiles:
+		cfg.MaxFiles = 0
+	case !hasMaxBackups:
+		cfg.MaxBackups = 0
+	}
+
+	return cfg
+}
+
 func defaultConfig() Config {
 	return Config{
 		Service: ServiceConfig{Host: "0.0.0.0", Port: 59994},
-		Logging: LoggingConfig{Level: "info", Format: "json"},
+		Logging: LoggingConfig{
+			Level:      "info",
+			Format:     "json",
+			MaxSize:    100,
+			MaxFiles:   7,
+			MaxBackups: 0,
+			Compress:   false,
+		},
 		Storage: StorageConfig{SQLitePath: "./data/runtime.db"},
 		HTTPReport: HTTPReportConfig{
 			TimeoutSec:             int((15 * time.Second).Seconds()),
