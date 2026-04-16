@@ -9,16 +9,15 @@ import (
 )
 
 type Config struct {
-	Service       ServiceConfig       `yaml:"service"`
-	Logging       LoggingConfig       `yaml:"logging"`
-	Storage       StorageConfig       `yaml:"storage"`
-	HTTPReport    HTTPReportConfig    `yaml:"httpReport"`
-	ReliableQueue ReliableQueueConfig `yaml:"reliableQueue"`
+	App     AppConfig     `yaml:"app"`
+	Logging LoggingConfig `yaml:"logging"`
+	Report  ReportConfig  `yaml:"report"`
+	Queue   QueueConfig   `yaml:"queue"`
 }
 
-type ServiceConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+type AppConfig struct {
+	Name   string `yaml:"name"`
+	Listen string `yaml:"listen"`
 }
 
 type LoggingConfig struct {
@@ -31,23 +30,18 @@ type LoggingConfig struct {
 	Compress   bool   `yaml:"compress"`
 }
 
-type StorageConfig struct {
-	SQLitePath string `yaml:"sqlitePath"`
-}
-
-type HTTPReportConfig struct {
-	BaseURL                    string `yaml:"baseURL"`
-	Path                       string `yaml:"path"`
+type ReportConfig struct {
+	URL                        string `yaml:"url"`
+	Token                      string `yaml:"token"`
+	Mac                        string `yaml:"mac"`
 	TimeoutSec                 int    `yaml:"timeoutSec"`
-	DeviceToken                string `yaml:"deviceToken"`
-	DeviceMac                  string `yaml:"deviceMac"`
 	DeviceCodeField            string `yaml:"deviceCodeField"`
 	AcceptedFalseIsSuccess     bool   `yaml:"acceptedFalseIsSuccess"`
 	OverwritePayloadDeviceCode bool   `yaml:"overwritePayloadDeviceCode"`
 	RetryableStatusCodes       []int  `yaml:"retryableStatusCodes"`
 }
 
-type ReliableQueueConfig struct {
+type QueueConfig struct {
 	Enabled          bool   `yaml:"enabled"`
 	SQLitePath       string `yaml:"sqlitePath"`
 	BatchSize        int    `yaml:"batchSize"`
@@ -82,11 +76,11 @@ func Load(path string) (Config, error) {
 
 func Normalize(cfg Config) Config {
 	def := defaultConfig()
-	if cfg.Service.Host == "" {
-		cfg.Service.Host = def.Service.Host
+	if cfg.App.Name == "" {
+		cfg.App.Name = def.App.Name
 	}
-	if cfg.Service.Port == 0 {
-		cfg.Service.Port = def.Service.Port
+	if cfg.App.Listen == "" {
+		cfg.App.Listen = def.App.Listen
 	}
 	if cfg.Logging.Level == "" {
 		cfg.Logging.Level = def.Logging.Level
@@ -100,32 +94,29 @@ func Normalize(cfg Config) Config {
 	if cfg.Logging.MaxFiles == 0 && cfg.Logging.MaxBackups == 0 {
 		cfg.Logging.MaxFiles = def.Logging.MaxFiles
 	}
-	if cfg.Storage.SQLitePath == "" {
-		cfg.Storage.SQLitePath = def.Storage.SQLitePath
+	if cfg.Report.TimeoutSec == 0 {
+		cfg.Report.TimeoutSec = def.Report.TimeoutSec
 	}
-	if cfg.HTTPReport.TimeoutSec == 0 {
-		cfg.HTTPReport.TimeoutSec = def.HTTPReport.TimeoutSec
+	if cfg.Report.DeviceCodeField == "" {
+		cfg.Report.DeviceCodeField = def.Report.DeviceCodeField
 	}
-	if cfg.HTTPReport.DeviceCodeField == "" {
-		cfg.HTTPReport.DeviceCodeField = def.HTTPReport.DeviceCodeField
+	if cfg.Queue.SQLitePath == "" {
+		cfg.Queue.SQLitePath = def.Queue.SQLitePath
 	}
-	if cfg.ReliableQueue.SQLitePath == "" {
-		cfg.ReliableQueue.SQLitePath = cfg.Storage.SQLitePath
+	if cfg.Queue.BatchSize == 0 {
+		cfg.Queue.BatchSize = def.Queue.BatchSize
 	}
-	if cfg.ReliableQueue.BatchSize == 0 {
-		cfg.ReliableQueue.BatchSize = def.ReliableQueue.BatchSize
+	if cfg.Queue.FlushIntervalMs == 0 {
+		cfg.Queue.FlushIntervalMs = def.Queue.FlushIntervalMs
 	}
-	if cfg.ReliableQueue.FlushIntervalMs == 0 {
-		cfg.ReliableQueue.FlushIntervalMs = def.ReliableQueue.FlushIntervalMs
+	if cfg.Queue.ReplayIntervalMs == 0 {
+		cfg.Queue.ReplayIntervalMs = def.Queue.ReplayIntervalMs
 	}
-	if cfg.ReliableQueue.ReplayIntervalMs == 0 {
-		cfg.ReliableQueue.ReplayIntervalMs = def.ReliableQueue.ReplayIntervalMs
+	if cfg.Queue.ReplayRatePerSec == 0 {
+		cfg.Queue.ReplayRatePerSec = def.Queue.ReplayRatePerSec
 	}
-	if cfg.ReliableQueue.ReplayRatePerSec == 0 {
-		cfg.ReliableQueue.ReplayRatePerSec = def.ReliableQueue.ReplayRatePerSec
-	}
-	if cfg.ReliableQueue.RetentionDays == 0 {
-		cfg.ReliableQueue.RetentionDays = def.ReliableQueue.RetentionDays
+	if cfg.Queue.RetentionDays == 0 {
+		cfg.Queue.RetentionDays = def.Queue.RetentionDays
 	}
 	return cfg
 }
@@ -161,7 +152,10 @@ func normalizeLoggingRetention(cfg LoggingConfig, hasMaxFiles, hasMaxBackups boo
 
 func defaultConfig() Config {
 	return Config{
-		Service: ServiceConfig{Host: "0.0.0.0", Port: 59994},
+		App: AppConfig{
+			Name:   "edge-service-http",
+			Listen: "0.0.0.0:59994",
+		},
 		Logging: LoggingConfig{
 			Level:      "info",
 			Format:     "json",
@@ -170,14 +164,13 @@ func defaultConfig() Config {
 			MaxBackups: 0,
 			Compress:   false,
 		},
-		Storage: StorageConfig{SQLitePath: "./data/runtime.db"},
-		HTTPReport: HTTPReportConfig{
+		Report: ReportConfig{
 			TimeoutSec:             int((15 * time.Second).Seconds()),
 			DeviceCodeField:        "deviceCode",
 			AcceptedFalseIsSuccess: true,
 			RetryableStatusCodes:   []int{408, 429, 500, 502, 503, 504},
 		},
-		ReliableQueue: ReliableQueueConfig{
+		Queue: QueueConfig{
 			Enabled:          true,
 			SQLitePath:       "./data/runtime.db",
 			BatchSize:        100,

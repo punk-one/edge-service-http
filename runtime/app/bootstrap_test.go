@@ -84,7 +84,7 @@ func TestApplicationRunStartsWorkers(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.yaml")
 	sqlitePath := filepath.Join(dir, "runtime.db")
 
-	configYAML := "service:\n  host: 127.0.0.1\n  port: 0\nlogging:\n  level: info\n  format: json\nhttpReport:\n  baseURL: http://127.0.0.1:1\n  path: /report\n  timeoutSec: 1\nreliableQueue:\n  enabled: false\n  sqlitePath: " + sqlitePath + "\n  replayIntervalMs: 10\n  replayRatePerSec: 1\n  retentionDays: 1\n"
+	configYAML := runtimeConfigYAML("127.0.0.1:0", "http://127.0.0.1:1/report", sqlitePath, "")
 	if err := os.WriteFile(cfgPath, []byte(configYAML), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestApplicationRunCancelsWorkersWhenServerStops(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.yaml")
 	sqlitePath := filepath.Join(dir, "runtime.db")
 
-	configYAML := "service:\n  host: 127.0.0.1\n  port: 0\nlogging:\n  level: info\n  format: json\nhttpReport:\n  baseURL: http://127.0.0.1:1\n  path: /report\n  timeoutSec: 1\nreliableQueue:\n  enabled: false\n  sqlitePath: " + sqlitePath + "\n  replayIntervalMs: 10\n  replayRatePerSec: 1\n  retentionDays: 1\n"
+	configYAML := runtimeConfigYAML("127.0.0.1:0", "http://127.0.0.1:1/report", sqlitePath, "")
 	if err := os.WriteFile(cfgPath, []byte(configYAML), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestApplicationRecordErrorMarksUnhealthyAndTracksRecentErrors(t *testing.T)
 	cfgPath := filepath.Join(dir, "config.yaml")
 	sqlitePath := filepath.Join(dir, "runtime.db")
 
-	configYAML := "service:\n  host: 127.0.0.1\n  port: 0\nlogging:\n  level: info\n  format: json\nhttpReport:\n  baseURL: http://127.0.0.1:1\n  path: /report\n  timeoutSec: 1\nreliableQueue:\n  enabled: false\n  sqlitePath: " + sqlitePath + "\n  replayIntervalMs: 10\n  replayRatePerSec: 1\n  retentionDays: 1\n"
+	configYAML := runtimeConfigYAML("127.0.0.1:0", "http://127.0.0.1:1/report", sqlitePath, "")
 	if err := os.WriteFile(cfgPath, []byte(configYAML), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestNewUsesOptionsConfigPath(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.yaml")
 	sqlitePath := filepath.Join(dir, "runtime.db")
 
-	configYAML := "service:\n  host: 127.0.0.1\n  port: 0\nlogging:\n  level: info\n  format: json\nhttpReport:\n  baseURL: http://127.0.0.1:1\n  path: /report\n  timeoutSec: 1\nreliableQueue:\n  enabled: false\n  sqlitePath: " + sqlitePath + "\n  replayIntervalMs: 10\n  replayRatePerSec: 1\n  retentionDays: 1\n"
+	configYAML := runtimeConfigYAML("127.0.0.1:0", "http://127.0.0.1:1/report", sqlitePath, "")
 	if err := os.WriteFile(cfgPath, []byte(configYAML), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -301,15 +301,14 @@ func TestNewUsesOptionsConfigOverride(t *testing.T) {
 		ConfigPath: "/definitely/missing/config.yaml",
 		Options: Options{
 			Config: &config.Config{
-				Service: config.ServiceConfig{Host: "127.0.0.1", Port: 0},
-				HTTPReport: config.HTTPReportConfig{
-					BaseURL:                "http://override.local",
-					Path:                   "/report",
+				App: config.AppConfig{Listen: "127.0.0.1:0"},
+				Report: config.ReportConfig{
+					URL:                    "http://override.local/report",
 					TimeoutSec:             1,
 					DeviceCodeField:        "deviceCode",
 					AcceptedFalseIsSuccess: true,
 				},
-				ReliableQueue: config.ReliableQueueConfig{
+				Queue: config.QueueConfig{
 					Enabled:          false,
 					SQLitePath:       filepath.Join(t.TempDir(), "runtime.db"),
 					ReplayIntervalMs: 10,
@@ -323,8 +322,8 @@ func TestNewUsesOptionsConfigOverride(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	if got := app.cfg.HTTPReport.BaseURL; got != "http://override.local" {
-		t.Fatalf("httpReport.baseURL = %q, want override value", got)
+	if got := app.cfg.Report.URL; got != "http://override.local/report" {
+		t.Fatalf("report.url = %q, want override value", got)
 	}
 }
 
@@ -373,7 +372,7 @@ func TestNewConfiguresFileLoggerWhenConfigured(t *testing.T) {
 	sqlitePath := filepath.Join(dir, "runtime.db")
 	logPath := filepath.Join(dir, "runtime.log")
 
-	configYAML := "service:\n  host: 127.0.0.1\n  port: 0\nlogging:\n  level: info\n  format: json\n  file: " + logPath + "\n  maxSize: 1\n  maxFiles: 1\n  maxBackups: 1\n  compress: false\nhttpReport:\n  baseURL: http://127.0.0.1:1\n  path: /report\n  timeoutSec: 1\nreliableQueue:\n  enabled: false\n  sqlitePath: " + sqlitePath + "\n  replayIntervalMs: 10\n  replayRatePerSec: 1\n  retentionDays: 1\n"
+	configYAML := runtimeConfigYAML("127.0.0.1:0", "http://127.0.0.1:1/report", sqlitePath, logPath)
 	if err := os.WriteFile(cfgPath, []byte(configYAML), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -399,4 +398,13 @@ func TestNewConfiguresFileLoggerWhenConfigured(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func runtimeConfigYAML(listen string, reportURL string, sqlitePath string, logPath string) string {
+	yaml := "app:\n  listen: " + listen + "\nlogging:\n  level: info\n  format: json\n"
+	if logPath != "" {
+		yaml += "  file: " + logPath + "\n  maxSize: 1\n  maxFiles: 1\n  maxBackups: 1\n  compress: false\n"
+	}
+	yaml += "report:\n  url: " + reportURL + "\n  timeoutSec: 1\nqueue:\n  enabled: false\n  sqlitePath: " + sqlitePath + "\n  replayIntervalMs: 10\n  replayRatePerSec: 1\n  retentionDays: 1\n"
+	return yaml
 }

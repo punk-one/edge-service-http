@@ -3,8 +3,7 @@ package http
 import "time"
 
 type Config struct {
-	BaseURL                    string
-	Path                       string
+	URL                        string
 	Timeout                    time.Duration
 	DeviceToken                string
 	DeviceMac                  string

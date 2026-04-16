@@ -34,8 +34,7 @@ func TestClientInjectsHeadersAndDeviceCode(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{
-		BaseURL:                server.URL,
-		Path:                   "/api/external/iot/spectrum",
+		URL:                    server.URL + "/api/external/iot/spectrum",
 		Timeout:                2 * time.Second,
 		DeviceToken:            "token-1",
 		DeviceMac:              "AA:BB",
@@ -65,7 +64,7 @@ func TestClientTreatsAcceptedFalseAsDelivered(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(Config{BaseURL: server.URL, Path: "/push", Timeout: time.Second, DeviceCodeField: "deviceCode", AcceptedFalseIsSuccess: true}, nil)
+	client := NewClient(Config{URL: server.URL + "/push", Timeout: time.Second, DeviceCodeField: "deviceCode", AcceptedFalseIsSuccess: true}, nil)
 	outcome, err := client.Send(context.Background(), ReportMessage{DeviceCode: "device-01", Payload: map[string]any{"sampleId": "S-002"}})
 	if err != nil {
 		t.Fatalf("Send returned error: %v", err)
@@ -82,7 +81,7 @@ func TestClientMarksHTTP503Retryable(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(Config{BaseURL: server.URL, Path: "/push", Timeout: time.Second, DeviceCodeField: "deviceCode", RetryableStatusCodes: []int{503}}, nil)
+	client := NewClient(Config{URL: server.URL + "/push", Timeout: time.Second, DeviceCodeField: "deviceCode", RetryableStatusCodes: []int{503}}, nil)
 	outcome, err := client.Send(context.Background(), ReportMessage{DeviceCode: "device-01", Payload: map[string]any{"sampleId": "S-003"}})
 	if err == nil {
 		t.Fatalf("expected error for 503")
@@ -106,8 +105,7 @@ func TestBuildPayloadRequiresDeviceCode(t *testing.T) {
 
 func TestClientReadFailureMarksRetryable(t *testing.T) {
 	client := NewClient(Config{
-		BaseURL:              "http://example.com",
-		Path:                 "/push",
+		URL:                  "http://example.com/push",
 		Timeout:              time.Second,
 		DeviceCodeField:      "deviceCode",
 		RetryableStatusCodes: []int{429},
@@ -135,8 +133,7 @@ func TestClientReadFailureMarksRetryable(t *testing.T) {
 
 func TestClientDoesNotRetryWhenContextCanceled(t *testing.T) {
 	client := NewClient(Config{
-		BaseURL:         "http://example.com",
-		Path:            "/push",
+		URL:             "http://example.com/push",
 		Timeout:         time.Second,
 		DeviceCodeField: "deviceCode",
 	}, nil)
@@ -164,8 +161,7 @@ func TestClientDoesNotRetryWhenContextCanceled(t *testing.T) {
 
 func TestClientDoesNotRetryWhenContextDeadlineExceeded(t *testing.T) {
 	client := NewClient(Config{
-		BaseURL:         "http://example.com",
-		Path:            "/push",
+		URL:             "http://example.com/push",
 		Timeout:         time.Second,
 		DeviceCodeField: "deviceCode",
 	}, nil)
@@ -203,4 +199,33 @@ type roundTripFunc func(req *http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+func TestClientOmitsMacHeaderWhenBlank(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Device-Mac"); got != "" {
+			t.Fatalf("mac header = %q, want omitted", got)
+		}
+		_, _ = w.Write([]byte(`{"errcode":0,"errmsg":"ok","data":{"accepted":true}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		URL:                    server.URL + "/push",
+		Timeout:                time.Second,
+		DeviceToken:            "token-1",
+		DeviceCodeField:        "deviceCode",
+		AcceptedFalseIsSuccess: true,
+	}, nil)
+
+	outcome, err := client.Send(context.Background(), ReportMessage{
+		DeviceCode: "device-02",
+		Payload:    map[string]any{"sampleId": "S-008"},
+	})
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if !outcome.Delivered {
+		t.Fatalf("unexpected outcome: %+v", outcome)
+	}
 }

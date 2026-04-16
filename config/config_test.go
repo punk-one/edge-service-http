@@ -9,7 +9,7 @@ import (
 func TestLoadConfigAppliesDefaults(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(path, []byte("service: {}\nhttpReport: {}\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("app: {}\nreport: {}\n"), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -17,13 +17,16 @@ func TestLoadConfigAppliesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if cfg.HTTPReport.DeviceCodeField != "deviceCode" {
-		t.Fatalf("DeviceCodeField = %q, want %q", cfg.HTTPReport.DeviceCodeField, "deviceCode")
+	if cfg.App.Listen != "0.0.0.0:59994" {
+		t.Fatalf("listen = %q, want default listen address", cfg.App.Listen)
 	}
-	if !cfg.HTTPReport.AcceptedFalseIsSuccess {
+	if cfg.Report.DeviceCodeField != "deviceCode" {
+		t.Fatalf("DeviceCodeField = %q, want %q", cfg.Report.DeviceCodeField, "deviceCode")
+	}
+	if !cfg.Report.AcceptedFalseIsSuccess {
 		t.Fatalf("AcceptedFalseIsSuccess = false, want true")
 	}
-	if cfg.ReliableQueue.SQLitePath == "" {
+	if cfg.Queue.SQLitePath == "" {
 		t.Fatalf("SQLitePath should be defaulted")
 	}
 	if cfg.Logging.MaxFiles != 7 {
@@ -37,7 +40,7 @@ func TestLoadConfigAppliesDefaults(t *testing.T) {
 func TestLoadConfigPreservesExplicitRetryableStatuses(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	body := []byte(`httpReport:
+	body := []byte(`report:
   retryableStatusCodes: [408, 429, 503]
  `)
 	if err := os.WriteFile(path, body, 0o644); err != nil {
@@ -48,7 +51,7 @@ func TestLoadConfigPreservesExplicitRetryableStatuses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if got, want := len(cfg.HTTPReport.RetryableStatusCodes), 3; got != want {
+	if got, want := len(cfg.Report.RetryableStatusCodes), 3; got != want {
 		t.Fatalf("retryable status count = %d, want %d", got, want)
 	}
 }
@@ -56,7 +59,7 @@ func TestLoadConfigPreservesExplicitRetryableStatuses(t *testing.T) {
 func TestLoadConfigPreservesExplicitAcceptedFalseIsSuccessFalse(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	body := []byte(`httpReport:
+	body := []byte(`report:
   acceptedFalseIsSuccess: false
  `)
 	if err := os.WriteFile(path, body, 0o644); err != nil {
@@ -67,7 +70,7 @@ func TestLoadConfigPreservesExplicitAcceptedFalseIsSuccessFalse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if cfg.HTTPReport.AcceptedFalseIsSuccess {
+	if cfg.Report.AcceptedFalseIsSuccess {
 		t.Fatalf("AcceptedFalseIsSuccess = true, want false")
 	}
 }
@@ -75,7 +78,7 @@ func TestLoadConfigPreservesExplicitAcceptedFalseIsSuccessFalse(t *testing.T) {
 func TestLoadConfigPreservesExplicitEmptyRetryableStatuses(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	body := []byte(`httpReport:
+	body := []byte(`report:
   retryableStatusCodes: []
 `)
 	if err := os.WriteFile(path, body, 0o644); err != nil {
@@ -86,11 +89,11 @@ func TestLoadConfigPreservesExplicitEmptyRetryableStatuses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if cfg.HTTPReport.RetryableStatusCodes == nil {
+	if cfg.Report.RetryableStatusCodes == nil {
 		t.Fatalf("RetryableStatusCodes nil, want empty slice")
 	}
-	if len(cfg.HTTPReport.RetryableStatusCodes) != 0 {
-		t.Fatalf("retryable status count = %d, want %d", len(cfg.HTTPReport.RetryableStatusCodes), 0)
+	if len(cfg.Report.RetryableStatusCodes) != 0 {
+		t.Fatalf("retryable status count = %d, want %d", len(cfg.Report.RetryableStatusCodes), 0)
 	}
 }
 

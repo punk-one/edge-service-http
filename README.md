@@ -16,21 +16,20 @@
 Store runtime settings in `./configs/config.yaml` as YAML. A representative configuration looks like:
 
 ```yaml
-service:
-  host: 0.0.0.0
-  port: 59994
+app:
+  name: edge-service-example
+  listen: 0.0.0.0:59994
 
-httpReport:
-  baseURL: http://mes-server:9389
-  path: /api/external/iot/spectrum
+report:
+  url: http://mes-server:9389/api/external/iot/spectrum
   timeoutSec: 15
-  deviceToken: your-device-token
-  deviceMac: AA:BB:CC:DD:EE:FF
+  token: your-device-token
+  mac: ""
   deviceCodeField: deviceCode
   acceptedFalseIsSuccess: true
   retryableStatusCodes: [408, 429, 500, 502, 503, 504]
 
-reliableQueue:
+queue:
   enabled: true
   sqlitePath: ./data/runtime.db
   replayIntervalMs: 3000

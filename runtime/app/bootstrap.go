@@ -76,27 +76,26 @@ func New(appCfg AppConfig) (*Application, error) {
 		Compress:   cfg.Logging.Compress,
 	})
 	transport := transporthttp.NewClient(transporthttp.Config{
-		BaseURL:                    cfg.HTTPReport.BaseURL,
-		Path:                       cfg.HTTPReport.Path,
-		Timeout:                    time.Duration(cfg.HTTPReport.TimeoutSec) * time.Second,
-		DeviceToken:                cfg.HTTPReport.DeviceToken,
-		DeviceMac:                  cfg.HTTPReport.DeviceMac,
-		DeviceCodeField:            cfg.HTTPReport.DeviceCodeField,
-		AcceptedFalseIsSuccess:     cfg.HTTPReport.AcceptedFalseIsSuccess,
-		OverwritePayloadDeviceCode: cfg.HTTPReport.OverwritePayloadDeviceCode,
-		RetryableStatusCodes:       append([]int(nil), cfg.HTTPReport.RetryableStatusCodes...),
+		URL:                        cfg.Report.URL,
+		Timeout:                    time.Duration(cfg.Report.TimeoutSec) * time.Second,
+		DeviceToken:                cfg.Report.Token,
+		DeviceMac:                  cfg.Report.Mac,
+		DeviceCodeField:            cfg.Report.DeviceCodeField,
+		AcceptedFalseIsSuccess:     cfg.Report.AcceptedFalseIsSuccess,
+		OverwritePayloadDeviceCode: cfg.Report.OverwritePayloadDeviceCode,
+		RetryableStatusCodes:       append([]int(nil), cfg.Report.RetryableStatusCodes...),
 	}, logger)
 
-	store, err := reliable.NewSQLiteStore(cfg.ReliableQueue.SQLitePath)
+	store, err := reliable.NewSQLiteStore(cfg.Queue.SQLitePath)
 	if err != nil {
 		return nil, fmt.Errorf("create sqlite store: %w", err)
 	}
 
 	dispatcher := reliable.NewDispatcher(reliable.Config{
-		Enabled:          cfg.ReliableQueue.Enabled,
-		ReplayIntervalMs: cfg.ReliableQueue.ReplayIntervalMs,
-		ReplayRatePerSec: cfg.ReliableQueue.ReplayRatePerSec,
-		RetentionDays:    cfg.ReliableQueue.RetentionDays,
+		Enabled:          cfg.Queue.Enabled,
+		ReplayIntervalMs: cfg.Queue.ReplayIntervalMs,
+		ReplayRatePerSec: cfg.Queue.ReplayRatePerSec,
+		RetentionDays:    cfg.Queue.RetentionDays,
 	}, transport, store, logger, opts.DeliveryObservers...)
 
 	application := &Application{
@@ -118,7 +117,7 @@ func New(appCfg AppConfig) (*Application, error) {
 		runtimeRouteRegistrars(application.options.RouteRegistrars)...,
 	)
 	application.httpServer = &stdhttp.Server{
-		Addr:    fmt.Sprintf("%s:%d", cfg.Service.Host, cfg.Service.Port),
+		Addr:    cfg.App.Listen,
 		Handler: application.ops.Handler(),
 	}
 

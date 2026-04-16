@@ -55,10 +55,7 @@ func (c *Client) Send(ctx context.Context, msg ReportMessage) (DeliveryOutcome, 
 		return DeliveryOutcome{FailureReason: err.Error()}, err
 	}
 
-	endpoint := strings.TrimRight(c.cfg.BaseURL, "/")
-	if strings.TrimSpace(c.cfg.Path) != "" {
-		endpoint += "/" + strings.TrimLeft(c.cfg.Path, "/")
-	}
+	endpoint := strings.TrimSpace(c.cfg.URL)
 	c.logger.Debug("http transport sending request", "endpoint", endpoint, "source", msg.Source)
 
 	req, err := stdhttp.NewRequestWithContext(ctx, stdhttp.MethodPost, endpoint, bytes.NewReader(body))
